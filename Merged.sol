@@ -70,7 +70,7 @@ contract StandardToken is Token {
     }
 
     function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
-      if (balances[_from] >= _value && allowed[_from][msg.sender] >= _value && _value > 0) {
+      if (balances[_from] >= _value && _value > 0) {
         balances[_to] += _value;
         balances[_from] -= _value;
         allowed[_from][msg.sender] -= _value;
@@ -104,7 +104,7 @@ contract NertiaToken is StandardToken {
     mapping (address => bool) public frozenAccount;
     using SafeMath for uint256;
     // metadata
-    string public constant name = "Nertia";
+    string public constant name = "NertiaT";
     string public constant symbol = "₦";
     uint256 public constant decimals = 18;
     string public constant version = "1.0";
@@ -125,6 +125,7 @@ contract NertiaToken is StandardToken {
     uint256 public startingTime;
     uint256 public _fundingStartBlock;
     uint256 public _fundingEndBlock;
+    bool public transferFrom;
     
     // only owner modifer
     modifier onlyOwner {if (msg.sender != nertiaFundDeposit) throw; _;}    
@@ -144,13 +145,16 @@ contract NertiaToken is StandardToken {
       fundingStartBlock = _fundingStartBlock;
       fundingEndBlock = _fundingEndBlock;
       totalSupply = nertiaFund.add(nertiaSHFunds);
-      balances[nertiaFundDeposit] = nertiaFund;    // Deposit Organization share
+      uint256 created_tokens = tokenCreationCap.sub(nertiaSHFunds);
+      balances[nertiaFundDeposit] = created_tokens;    // Deposit Organization share
+      CreateNertia(nertiaFundDeposit, created_tokens);  // logs Organization fund
       nertiaShareHolders();
-      CreateNertia(nertiaFundDeposit, nertiaFund);  // logs Organization fund
+
+      
     }
 
     /// @dev Accepts ether and creates new Nertia tokens.
-    function createTokens() payable external {
+    function () payable {
       if (isFinalized && msg.value <= 0) throw;
       if (block.number < fundingStartBlock) throw;
       if (block.number > fundingEndBlock) throw;
@@ -167,8 +171,11 @@ contract NertiaToken is StandardToken {
       // return money if something goes wrong
       if (tokenCreationCap < checkedSupply) throw; 
       
+      // return money if transfer is not successfull.
+      if(!transferFrom(nertiaFundDeposit, msg.sender, tokens)) throw;
+
       totalSupply = checkedSupply;
-      transferFrom(nertiaFundDeposit, msg.sender, tokens);
+      
       CreateNertia(msg.sender, tokens);  // logs token creation
     }
 
@@ -229,14 +236,14 @@ contract NertiaToken is StandardToken {
     }
 
     function nertiaShareHolders(){
-        uint256 share = nertiaSHFunds.div(2);
+        //uint256 share = nertiaSHFunds.div(2);
         /*balances["0xc72d70E57d99d6a42D0bCfBF5Fff1b18Bd1067BD"] += share;
         balances["0x2a8C332CFf2bB93C84bEcc690fFAFfdE803E813e"] += share;
         balances["0xD9E6c5792aAcf76244B01c215F38803d9c46E8cB"] += share;
         balances["0x409A7984535682980b9eB45E235F23fb09cCb975"] += share;
         balances["0x4DBA298F414EefA6430CfBCc051c4956DFb6f60C"] += share;*/  
-        balances["0x88eb247D39BE82a6826a7136058Dd2204969ae67"] += share;
-        balances["0xe3bec4c30292398960a2C3BbDb6dA2579c287364"] += share;
+        //balances["0xdb4c3fb46c11b2c9076ca62a4475c8a309f0b37d"] += share;
+        //balances["0xd73f84263bcb55b7413bfaa513d7f6a685550ff0"] += share;
     }   
 
 }
