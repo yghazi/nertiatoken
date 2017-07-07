@@ -1,113 +1,18 @@
 pragma solidity ^0.4.11;
 
-library SafeMath {
-  function mul(uint256 a, uint256 b) internal returns (uint256) {
-    uint256 c = a * b;
-    assert(a == 0 || c / a == b);
-    return c;
-  }
-
-  function div(uint256 a, uint256 b) internal returns (uint256) {
-    // assert(b > 0); // Solidity automatically throws when dividing by 0
-    uint256 c = a / b;
-    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
-    return c;
-  }
-
-  function sub(uint256 a, uint256 b) internal returns (uint256) {
-    assert(b <= a);
-    return a - b;
-  }
-
-  function add(uint256 a, uint256 b) internal returns (uint256) {
-    uint256 c = a + b;
-    assert(c >= a);
-    return c;
-  }
-
-  function max64(uint64 a, uint64 b) internal constant returns (uint64) {
-    return a >= b ? a : b;
-  }
-
-  function min64(uint64 a, uint64 b) internal constant returns (uint64) {
-    return a < b ? a : b;
-  }
-
-  function max256(uint256 a, uint256 b) internal constant returns (uint256) {
-    return a >= b ? a : b;
-  }
-
-  function min256(uint256 a, uint256 b) internal constant returns (uint256) {
-    return a < b ? a : b;
-  }
-
-}
-
-contract Token {
-    uint256 public totalSupply;
-    function balanceOf(address _owner) constant returns (uint256 balance);
-    function transfer(address _to, uint256 _value) returns (bool success);
-    function transferFrom(address _from, address _to, uint256 _value) returns (bool success);
-    function approve(address _spender, uint256 _value) returns (bool success);
-    function allowance(address _owner, address _spender) constant returns (uint256 remaining);
-    event Transfer(address indexed _from, address indexed _to, uint256 _value);
-    event Approval(address indexed _owner, address indexed _spender, uint256 _value);
-}
-
-
-/*  ERC 20 token */
-contract StandardToken is Token {
-    
-    function transfer(address _to, uint256 _value) returns (bool success) {
-      if (balances[msg.sender] >= _value && _value > 0) {
-        balances[msg.sender] -= _value;
-        balances[_to] += _value;
-        Transfer(msg.sender, _to, _value);
-        return true;
-      } else {
-        return false;
-      }
-    }
-
-    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
-      if (balances[_from] >= _value && _value > 0) {
-        balances[_to] += _value;
-        balances[_from] -= _value;
-        allowed[_from][msg.sender] -= _value;
-        Transfer(_from, _to, _value);
-        return true;
-      } else {
-        return false;
-      }
-    }
-
-    function balanceOf(address _owner) constant returns (uint256 balance) {
-        return balances[_owner];
-    }
-
-    function approve(address _spender, uint256 _value) returns (bool success) {
-        allowed[msg.sender][_spender] = _value;
-        Approval(msg.sender, _spender, _value);
-        return true;
-    }
-
-    function allowance(address _owner, address _spender) constant returns (uint256 remaining) {
-      return allowed[_owner][_spender];
-    }
-
-    mapping (address => uint256) balances;
-    mapping (address => mapping (address => uint256)) allowed;
-}
+import './StandardToken.sol';
 
 contract NertiaToken is StandardToken {
     
     mapping (address => bool) public frozenAccount;
     using SafeMath for uint256;
     // metadata
-    string public constant name = "NertiaT";
+    string public constant name = "Nertia";
     string public constant symbol = "₦";
     uint256 public constant decimals = 18;
     string public constant version = "1.0";
+
+    mapping(address => uint256) bonuses;
 
     // contracts
     address public ethFundDeposit;      // deposit address for ETH for Organization
@@ -125,7 +30,6 @@ contract NertiaToken is StandardToken {
     uint256 public startingTime;
     uint256 public _fundingStartBlock;
     uint256 public _fundingEndBlock;
-    bool public transferFrom;
     
     // only owner modifer
     modifier onlyOwner {if (msg.sender != nertiaFundDeposit) throw; _;}    
@@ -145,22 +49,23 @@ contract NertiaToken is StandardToken {
       fundingStartBlock = _fundingStartBlock;
       fundingEndBlock = _fundingEndBlock;
       totalSupply = nertiaFund.add(nertiaSHFunds);
-      uint256 created_tokens = tokenCreationCap.sub(nertiaSHFunds);
-      balances[nertiaFundDeposit] = created_tokens;    // Deposit Organization share
-      CreateNertia(nertiaFundDeposit, created_tokens);  // logs Organization fund
+      balances[nertiaFundDeposit] = nertiaFund;    // Deposit Organization share
       nertiaShareHolders();
-
-      
+      CreateNertia(nertiaFundDeposit, nertiaFund);  // logs Organization fund
     }
 
     /// @dev Accepts ether and creates new Nertia tokens.
-    function () payable {
+    function createTokens() payable external {
       if (isFinalized && msg.value <= 0) throw;
       if (block.number < fundingStartBlock) throw;
       if (block.number > fundingEndBlock) throw;
       
       // calculating bouns 
-      uint256 amount = msg.value.add(calcBonus(msg.value));
+      uint256 bonus = calcBonus(msg.value);
+      if(bonus > 0)
+        bonuses[msg.sender] = [bonus];
+      
+      uint256 amount = msg.value.add(bonus);
 
       // return money if insuccefficent balance.
       if(balances[nertiaFundDeposit] < amount) throw;
@@ -171,11 +76,8 @@ contract NertiaToken is StandardToken {
       // return money if something goes wrong
       if (tokenCreationCap < checkedSupply) throw; 
       
-      // return money if transfer is not successfull.
-      if(!transferFrom(nertiaFundDeposit, msg.sender, tokens)) throw;
-
       totalSupply = checkedSupply;
-      
+      transferFrom(nertiaFundDeposit, msg.sender, tokens);
       CreateNertia(msg.sender, tokens);  // logs token creation
     }
 
@@ -200,6 +102,11 @@ contract NertiaToken is StandardToken {
       if (nertiaVal == 0) throw;
       balances[msg.sender] = 0;
       totalSupply = totalSupply.sub(nertiaVal); // extra safe
+      
+      if(bonuses[msg.sender] > 0){
+        nertiaVal = nertiaVal.sub(bonuses[msg.sender]); 
+      }
+      
       uint256 ethVal = nertiaVal.div(tokenExchangeRate);
       LogRefund(msg.sender, ethVal);               // log it 
       if (!msg.sender.send(ethVal)) throw;       // if you're using a contract; make sure it works with .send gas limits
@@ -236,14 +143,14 @@ contract NertiaToken is StandardToken {
     }
 
     function nertiaShareHolders(){
-        //uint256 share = nertiaSHFunds.div(2);
+        uint256 share = nertiaSHFunds.div(2);
         /*balances["0xc72d70E57d99d6a42D0bCfBF5Fff1b18Bd1067BD"] += share;
         balances["0x2a8C332CFf2bB93C84bEcc690fFAFfdE803E813e"] += share;
         balances["0xD9E6c5792aAcf76244B01c215F38803d9c46E8cB"] += share;
         balances["0x409A7984535682980b9eB45E235F23fb09cCb975"] += share;
         balances["0x4DBA298F414EefA6430CfBCc051c4956DFb6f60C"] += share;*/  
-        //balances["0xdb4c3fb46c11b2c9076ca62a4475c8a309f0b37d"] += share;
-        //balances["0xd73f84263bcb55b7413bfaa513d7f6a685550ff0"] += share;
+        balances["0x88eb247D39BE82a6826a7136058Dd2204969ae67"] += share;
+        balances["0xe3bec4c30292398960a2C3BbDb6dA2579c287364"] += share;
     }   
 
 }
